@@ -1,0 +1,509 @@
+# YouTube视频下载应用部署指南
+## 4核6G云服务器部署步骤
+
+## 1. 服务器环境准备
+
+### 1.1 系统更新
+```bash
+# 更新系统包
+sudo apt update && sudo apt upgrade -y
+
+# 安装基础工具
+sudo apt install -y curl wget git unzip htop tree
+```
+
+### 1.2 安装Python环境
+```bash
+# 安装Python 3.8+和相关工具
+sudo apt install -y python3 python3-pip python3-venv
+
+# 验证安装
+python3 --version
+pip3 --version
+```
+
+### 1.3 安装系统依赖
+```bash
+# 安装Redis服务器
+sudo apt install -y redis-server
+
+# 安装FFmpeg
+sudo apt install -y ffmpeg
+
+# 安装其他必要工具
+sudo apt install -y build-essential libffi-dev
+```
+
+## 2. 项目部署
+
+### 2.1 克隆项目代码
+```bash
+# 创建项目目录
+mkdir -p /opt/youtube_downloader
+cd /opt/youtube_downloader
+
+# 克隆项目代码（假设从Git仓库获取）
+git clone <你的项目仓库地址> .
+
+# 或者上传项目文件到服务器
+# scp -r /本地项目路径/* user@服务器IP:/opt/youtube_downloader/
+```
+
+### 2.2 创建Python虚拟环境
+```bash
+# 创建虚拟环境
+python3 -m venv venv
+
+# 激活虚拟环境
+source venv/bin/activate
+
+# 升级pip
+pip install --upgrade pip
+
+# 安装项目依赖
+pip install -r requirements.txt
+
+# 安装yt-dlp
+pip install yt-dlp
+```
+
+## 3. 配置优化
+
+### 3.1 Redis配置优化
+```bash
+# 备份原始配置
+sudo cp /etc/redis/redis.conf /etc/redis/redis.conf.backup
+
+# 编辑Redis配置
+sudo nano /etc/redis/redis.conf
+
+# 主要配置项修改：
+# bind 127.0.0.1 ::1          # 绑定本地访问
+# port 6379                   # Redis端口
+# supervised systemd          # 使用systemd管理
+# maxmemory 512mb            # 限制内存使用
+# maxmemory-policy allkeys-lru # 内存淘汰策略
+```
+
+### 3.2 启动Redis服务
+```bash
+# 启动Redis服务
+sudo systemctl start redis-server
+
+# 设置开机自启
+sudo systemctl enable redis-server
+
+# 检查Redis状态
+sudo systemctl status redis-server
+
+# 测试Redis连接
+redis-cli ping
+```
+
+### 3.3 环境变量配置
+```bash
+# 创建环境变量文件
+cat > /opt/youtube_downloader/.env << 'EOF'
+# Flask配置
+SECRET_KEY=your-production-secret-key-here
+FLASK_ENV=production
+
+# Redis配置
+REDIS_URL=redis://localhost:6379/0
+
+# 应用配置
+CACHE_DIR=/opt/youtube_downloader/cache
+EOF
+
+# 设置文件权限
+chmod 600 /opt/youtube_downloader/.env
+```
+
+## 4. 应用配置
+
+### 4.1 创建必要的目录
+```bash
+# 创建缓存目录
+mkdir -p /opt/youtube_downloader/cache
+
+# 设置目录权限
+sudo chown -R $USER:$USER /opt/youtube_downloader
+chmod -R 755 /opt/youtube_downloader
+```
+
+### 4.2 更新应用配置
+```bash
+# 编辑config/celery_config.py，确保配置正确
+cat > /opt/youtube_downloader/config/celery_config.py << 'EOF'
+# Celery配置
+from celery.schedules import crontab
+import os
+
+# Broker设置 - 从环境变量读取，如果没有则使用默认值
+CELERY_BROKER_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
+
+# 任务序列化设置
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_ACCEPT_CONTENT = ['json']
+
+# 时区设置
+CELERY_TIMEZONE = 'UTC'
+CELERY_ENABLE_UTC = True
+
+# 定时任务配置
+CELERY_BEAT_SCHEDULE = {
+    'cleanup-expired-videos': {
+        'task': 'app.tasks.cleanup_expired_videos',
+        'schedule': crontab(minute=0, hour='*'),  # 每小时执行一次
+    },
+}
+EOF
+```
+
+## 5. 系统服务配置
+
+### 5.1 创建Systemd服务文件
+
+#### Flask应用服务
+```bash
+# 创建Flask应用服务文件
+sudo cat > /etc/systemd/system/youtube-downloader-app.service << 'EOF'
+[Unit]
+Description=YouTube Downloader Flask App
+After=network.target redis-server.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/youtube_downloader
+Environment=PATH=/opt/youtube_downloader/venv/bin
+EnvironmentFile=/opt/youtube_downloader/.env
+ExecStart=/opt/youtube_downloader/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:5000 --timeout 120 app:app
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+#### Celery Worker服务
+```bash
+# 创建Celery Worker服务文件
+sudo cat > /etc/systemd/system/youtube-downloader-worker.service << 'EOF'
+[Unit]
+Description=YouTube Downloader Celery Worker
+After=network.target redis-server.service
+
+[Service]
+Type=forking
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/youtube_downloader
+Environment=PATH=/opt/youtube_downloader/venv/bin
+EnvironmentFile=/opt/youtube_downloader/.env
+ExecStart=/opt/youtube_downloader/venv/bin/celery -A celery_app.celery worker --loglevel=info --concurrency=4 --pidfile=/var/run/celery/worker.pid
+ExecReload=/bin/kill -HUP $MAINPID
+PIDFile=/var/run/celery/worker.pid
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+#### Celery Beat服务
+```bash
+# 创建Celery Beat服务文件
+sudo cat > /etc/systemd/system/youtube-downloader-beat.service << 'EOF'
+[Unit]
+Description=YouTube Downloader Celery Beat
+After=network.target redis-server.service
+
+[Service]
+Type=forking
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/youtube_downloader
+Environment=PATH=/opt/youtube_downloader/venv/bin
+EnvironmentFile=/opt/youtube_downloader/.env
+ExecStart=/opt/youtube_downloader/venv/bin/celery -A celery_app.celery beat --loglevel=info --pidfile=/var/run/celery/beat.pid
+ExecReload=/bin/kill -HUP $MAINPID
+PIDFile=/var/run/celery/beat.pid
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+### 5.2 创建Celery运行目录
+```bash
+# 创建Celery PID文件目录
+sudo mkdir -p /var/run/celery
+sudo chown www-data:www-data /var/run/celery
+
+# 创建Celery日志目录
+sudo mkdir -p /var/log/celery
+sudo chown www-data:www-data /var/log/celery
+```
+
+### 5.3 重新加载Systemd配置
+```bash
+# 重新加载systemd配置
+sudo systemctl daemon-reload
+
+# 设置服务开机自启
+sudo systemctl enable youtube-downloader-app.service
+sudo systemctl enable youtube-downloader-worker.service
+sudo systemctl enable youtube-downloader-beat.service
+```
+
+## 6. 反向代理配置（Nginx）
+
+### 6.1 安装Nginx
+```bash
+# 安装Nginx
+sudo apt install -y nginx
+
+# 启动Nginx
+sudo systemctl start nginx
+sudo systemctl enable nginx
+```
+
+### 6.2 配置Nginx反向代理
+```bash
+# 创建Nginx配置文件
+sudo cat > /etc/nginx/sites-available/youtube-downloader << 'EOF'
+server {
+    listen 80;
+    server_name your-domain.com;  # 替换为你的域名或服务器IP
+
+    # 客户端最大请求体大小
+    client_max_body_size 16M;
+
+    # 代理Flask应用
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+    }
+
+    # 缓存静态文件（如果需要）
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # 日志配置
+    access_log /var/log/nginx/youtube_downloader_access.log;
+    error_log /var/log/nginx/youtube_downloader_error.log;
+}
+EOF
+
+# 启用站点配置
+sudo ln -s /etc/nginx/sites-available/youtube-downloader /etc/nginx/sites-enabled/
+
+# 测试Nginx配置
+sudo nginx -t
+
+# 重启Nginx
+sudo systemctl restart nginx
+```
+
+## 7. 安全配置
+
+### 7.1 防火墙配置
+```bash
+# 启用UFW防火墙
+sudo ufw enable
+
+# 允许SSH访问
+sudo ufw allow ssh
+
+# 允许HTTP访问
+sudo ufw allow 80
+
+# 允许HTTPS访问（如果配置SSL）
+sudo ufw allow 443
+
+# 查看防火墙状态
+sudo ufw status
+```
+
+### 7.2 SSL证书配置（可选）
+```bash
+# 安装Certbot
+sudo apt install -y certbot python3-certbot-nginx
+
+# 获取SSL证书
+sudo certbot --nginx -d your-domain.com
+
+# 设置自动续期
+sudo crontab -e
+# 添加以下行：
+# 0 12 * * * /usr/bin/certbot renew --quiet
+```
+
+## 8. 启动服务
+
+### 8.1 启动所有服务
+```bash
+# 启动应用服务
+sudo systemctl start youtube-downloader-app.service
+sudo systemctl start youtube-downloader-worker.service
+sudo systemctl start youtube-downloader-beat.service
+
+# 检查服务状态
+sudo systemctl status youtube-downloader-app.service
+sudo systemctl status youtube-downloader-worker.service
+sudo systemctl status youtube-downloader-beat.service
+```
+
+### 8.2 查看服务日志
+```bash
+# 查看Flask应用日志
+sudo journalctl -u youtube-downloader-app.service -f
+
+# 查看Celery Worker日志
+sudo journalctl -u youtube-downloader-worker.service -f
+
+# 查看Celery Beat日志
+sudo journalctl -u youtube-downloader-beat.service -f
+
+# 查看Nginx日志
+sudo tail -f /var/log/nginx/youtube_downloader_access.log
+```
+
+## 9. 性能监控和优化
+
+### 9.1 系统监控脚本
+```bash
+# 创建监控脚本
+cat > /opt/youtube_downloader/monitor.sh << 'EOF'
+#!/bin/bash
+echo "=== 系统资源使用情况 ==="
+htop -C
+
+echo "=== 磁盘使用情况 ==="
+df -h
+
+echo "=== 内存使用情况 ==="
+free -h
+
+echo "=== Redis状态 ==="
+redis-cli info memory
+
+echo "=== Celery任务队列 ==="
+redis-cli llen celery
+
+echo "=== 应用进程 ==="
+ps aux | grep -E "(gunicorn|celery|redis)"
+EOF
+
+chmod +x /opt/youtube_downloader/monitor.sh
+```
+
+### 9.2 定期清理脚本
+```bash
+# 创建定期清理脚本
+cat > /opt/youtube_downloader/cleanup.sh << 'EOF'
+#!/bin/bash
+# 清理过期日志文件
+find /var/log/celery -name "*.log" -mtime +7 -delete
+find /var/log/nginx -name "*youtube_downloader*" -mtime +7 -delete
+
+# 清理过期缓存文件（如果应用清理不及时）
+find /opt/youtube_downloader/cache -name "*" -mtime +1 -delete
+EOF
+
+chmod +x /opt/youtube_downloader/cleanup.sh
+
+# 添加到crontab
+crontab -e
+# 添加以下行：
+# 0 2 * * * /opt/youtube_downloader/cleanup.sh
+```
+
+## 10. 备份和恢复
+
+### 10.1 备份脚本
+```bash
+# 创建备份脚本
+cat > /opt/youtube_downloader/backup.sh << 'EOF'
+#!/bin/bash
+BACKUP_DIR="/opt/backups/youtube_downloader"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+mkdir -p $BACKUP_DIR
+
+# 备份应用代码
+tar -czf $BACKUP_DIR/app_$DATE.tar.gz /opt/youtube_downloader
+
+# 备份Redis数据
+redis-cli BGSAVE
+cp /var/lib/redis/dump.rdb $BACKUP_DIR/redis_$DATE.rdb
+
+echo "备份完成: $DATE"
+EOF
+
+chmod +x /opt/youtube_downloader/backup.sh
+```
+
+## 11. 故障排除
+
+### 常见问题及解决方案：
+
+1. **服务启动失败**：
+   ```bash
+   # 检查服务状态
+   sudo systemctl status youtube-downloader-app.service
+   
+   # 查看详细日志
+   sudo journalctl -u youtube-downloader-app.service --no-pager
+   ```
+
+2. **Redis连接问题**：
+   ```bash
+   # 检查Redis状态
+   sudo systemctl status redis-server
+   
+   # 测试连接
+   redis-cli ping
+   ```
+
+3. **下载任务失败**：
+   ```bash
+   # 检查Celery Worker日志
+   sudo journalctl -u youtube-downloader-worker.service -f
+   ```
+
+4. **内存不足**：
+   ```bash
+   # 检查内存使用
+   free -h
+   
+   # 调整Celery Worker并发数
+   # 编辑服务文件，减少--concurrency参数
+   ```
+
+## 12. 性能调优建议
+
+### 4核6G服务器优化配置：
+1. **Flask应用**：3个Gunicorn worker进程
+2. **Celery Worker**：4个并发worker
+3. **Redis内存**：限制在512MB以内
+4. **文件缓存**：启用Nginx静态文件缓存
+5. **连接超时**：适当增加超时时间以适应大文件下载
+
+完成以上部署步骤后，你的YouTube视频下载应用就可以在4核6G的云服务器上稳定运行了。
