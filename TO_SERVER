@@ -42,14 +42,30 @@ sudo apt install -y build-essential libffi-dev
 mkdir -p /opt/youtube_downloader
 cd /opt/youtube_downloader
 
-# 克隆项目代码（假设从Git仓库获取）
-git clone <你的项目仓库地址> .
+# 克隆后端项目代码（假设从Git仓库获取）
+git clone <你的后端项目仓库地址> .
 
 # 或者上传项目文件到服务器
-# scp -r /本地项目路径/* user@服务器IP:/opt/youtube_downloader/
+# scp -r /本地后端项目路径/* user@服务器IP:/opt/youtube_downloader/
 ```
 
-### 2.2 创建Python虚拟环境
+### 2.2 部署前端项目
+```bash
+# 创建前端目录
+mkdir -p /opt/youtube_downloader/frontend
+
+# 克隆前端项目代码（假设从Git仓库获取）
+git clone <你的前端项目仓库地址> /opt/youtube_downloader/frontend
+
+# 或者上传前端文件到服务器
+# scp -r /本地前端项目路径/* user@服务器IP:/opt/youtube_downloader/frontend
+
+# 设置前端目录权限
+sudo chown -R www-data:www-data /opt/youtube_downloader/frontend
+chmod -R 755 /opt/youtube_downloader/frontend
+```
+
+### 2.3 创建Python虚拟环境
 ```bash
 # 创建虚拟环境
 python3 -m venv venv
@@ -113,6 +129,10 @@ REDIS_URL=redis://localhost:6379/0
 
 # 应用配置
 CACHE_DIR=/opt/youtube_downloader/cache
+VIDEO_DIR=/opt/youtube_downloader/cache
+
+# 前端配置
+FRONTEND_DIR=/opt/youtube_downloader/frontend
 EOF
 
 # 设置文件权限
@@ -126,8 +146,11 @@ chmod 600 /opt/youtube_downloader/.env
 # 创建缓存目录
 mkdir -p /opt/youtube_downloader/cache
 
+# 创建视频存储目录
+mkdir -p /opt/youtube_downloader/cache/videos
+
 # 设置目录权限
-sudo chown -R $USER:$USER /opt/youtube_downloader
+sudo chown -R www-data:www-data /opt/youtube_downloader
 chmod -R 755 /opt/youtube_downloader
 ```
 
@@ -287,9 +310,16 @@ server {
     # 客户端最大请求体大小
     client_max_body_size 16M;
 
-    # 代理Flask应用
+    # 服务前端静态文件
     location / {
-        proxy_pass http://127.0.0.1:5000;
+        root /opt/youtube_downloader/frontend;
+        index index.html;
+        try_files $uri $uri/ =404;
+    }
+
+    # 代理API请求到Flask应用
+    location /api/ {
+        proxy_pass http://127.0.0.1:5000/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -299,8 +329,36 @@ server {
         proxy_read_timeout 300s;
     }
 
-    # 缓存静态文件（如果需要）
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js)$ {
+    # 代理下载请求到Flask应用
+    location /download {
+        proxy_pass http://127.0.0.1:5000/download;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 代理状态查询请求到Flask应用
+    location /status/ {
+        proxy_pass http://127.0.0.1:5000/status/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 代理视频文件请求到Flask应用
+    location /video/ {
+        proxy_pass http://127.0.0.1:5000/video/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 缓存静态文件
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff|woff2|ttf|eot|svg)$ {
+        root /opt/youtube_downloader/frontend;
         expires 1y;
         add_header Cache-Control "public, immutable";
     }
@@ -506,4 +564,46 @@ chmod +x /opt/youtube_downloader/backup.sh
 4. **文件缓存**：启用Nginx静态文件缓存
 5. **连接超时**：适当增加超时时间以适应大文件下载
 
-完成以上部署步骤后，你的YouTube视频下载应用就可以在4核6G的云服务器上稳定运行了。
+## 13. 部署验证
+
+### 部署完成后验证步骤：
+```bash
+# 1. 检查所有服务状态
+sudo systemctl status youtube-downloader-app.service
+sudo systemctl status youtube-downloader-worker.service
+sudo systemctl status youtube-downloader-beat.service
+sudo systemctl status nginx
+sudo systemctl status redis-server
+
+# 2. 检查前端文件是否正确部署
+ls -la /opt/youtube_downloader/frontend/
+
+# 3. 检查Nginx配置
+sudo nginx -t
+
+# 4. 检查应用是否响应
+curl -I http://localhost/
+
+# 5. 检查API是否响应
+curl -I http://localhost/download
+
+# 6. 查看服务日志
+sudo journalctl -u youtube-downloader-app.service --no-pager | tail -20
+```
+
+### 常用管理命令：
+```bash
+# 重启所有服务
+sudo systemctl restart youtube-downloader-app.service
+sudo systemctl restart youtube-downloader-worker.service
+sudo systemctl restart youtube-downloader-beat.service
+sudo systemctl restart nginx
+
+# 查看实时日志
+sudo journalctl -u youtube-downloader-app.service -f
+
+# 重新加载Nginx配置
+sudo nginx -s reload
+```
+
+完成以上所有步骤后，您的YouTube视频下载应用就已经成功部署到云服务器上了。可以通过服务器IP或域名访问应用。
