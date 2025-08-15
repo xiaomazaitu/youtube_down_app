@@ -1,4 +1,4 @@
-# YouTube视频下载应用部署指南
+# YouTube视频下载应用部署指南 (vkdown.com)
 ## 4核6G云服务器部署步骤
 
 ## 1. 服务器环境准备
@@ -282,7 +282,7 @@ sudo systemctl enable nginx
 sudo cat > /etc/nginx/sites-available/youtube-downloader << 'EOF'
 server {
     listen 80;
-    server_name your-domain.com;  # 替换为你的域名或服务器IP
+    server_name vkdown.com;  # 替换为你的域名或服务器IP
 
     # 客户端最大请求体大小
     client_max_body_size 16M;
@@ -347,7 +347,7 @@ sudo ufw status
 sudo apt install -y certbot python3-certbot-nginx
 
 # 获取SSL证书
-sudo certbot --nginx -d your-domain.com
+sudo certbot --nginx -d vkdown.com
 
 # 设置自动续期
 sudo crontab -e
