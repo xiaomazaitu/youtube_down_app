@@ -60,7 +60,7 @@ def download_video(self, url):
             filename = mp4_filename
         
         # 返回文件路径
-        relative_path = os.path.relpath(filename, basedir)
+        relative_path = os.path.relpath(filename, cache_dir)
         return {
             'status': 'completed',
             'filename': relative_path,

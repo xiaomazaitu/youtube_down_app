@@ -39,7 +39,7 @@ def download_video_api():
     return jsonify({'message': 'Download started', 'task_id': task.id}), 202
 
 @bp.route('/status/<task_id>', methods=['GET'])
-@rate_limit(limit=600, window=3600)  # 限制每小时600次请求
+# @rate_limit(limit=600, window=3600)  # 限制每小时600次请求
 def get_status(task_id):
     # 获取Celery任务状态
     task = download_video.AsyncResult(task_id)
