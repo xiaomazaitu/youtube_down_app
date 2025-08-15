@@ -68,31 +68,47 @@ install_system_dependencies() {
     sudo apt install -y build-essential libffi-dev
 }
 
-# 克隆项目代码
-clone_project() {
-    log "克隆项目代码..."
+# 克隆后端项目代码
+clone_backend_project() {
+    log "克隆后端项目代码..."
     
-    # 创建项目目录
-    mkdir -p /opt/youtube_downloader
-    cd /opt/youtube_downloader
+    # 创建后端项目目录
+    mkdir -p /opt/youtube_app
+    cd /opt/youtube_app
     
-    # 克隆项目代码（这里假设从Git仓库获取，需要替换为实际仓库地址）
-    # git clone <你的项目仓库地址> .
+    # 克隆后端项目代码（这里假设从Git仓库获取，需要替换为实际仓库地址）
+    # git clone <你的后端项目仓库地址> .
     # 或者如果项目文件已上传到服务器，可以跳过此步骤
     
     # 创建必要的目录
-    mkdir -p /opt/youtube_downloader/cache
+    mkdir -p /opt/youtube_app/cache
     
     # 设置目录权限
-    sudo chown -R $USER:$USER /opt/youtube_downloader
-    chmod -R 755 /opt/youtube_downloader
+    sudo chown -R www-data:www-data /opt/youtube_app
+    chmod -R 755 /opt/youtube_app
+}
+
+# 克隆前端项目代码
+clone_frontend_project() {
+    log "克隆前端项目代码..."
+    
+    # 创建前端项目目录
+    mkdir -p /opt/youtube_web
+    
+    # 克隆前端项目代码（这里假设从Git仓库获取，需要替换为实际仓库地址）
+    # git clone <你的前端项目仓库地址> /opt/youtube_web
+    # 或者如果项目文件已上传到服务器，可以跳过此步骤
+    
+    # 设置前端目录权限
+    sudo chown -R www-data:www-data /opt/youtube_web
+    chmod -R 755 /opt/youtube_web
 }
 
 # 创建Python虚拟环境
 setup_virtualenv() {
     log "创建Python虚拟环境..."
     
-    cd /opt/youtube_downloader
+    cd /opt/youtube_app
     
     # 创建虚拟环境
     python3 -m venv venv
@@ -131,12 +147,12 @@ configure_redis() {
     redis-cli ping
 }
 
-# 环境变量配置
-configure_env() {
-    log "配置环境变量..."
+# 后端环境变量配置
+configure_backend_env() {
+    log "配置后端环境变量..."
     
-    # 创建环境变量文件
-    cat > /opt/youtube_downloader/.env << 'EOF'
+    # 创建后端环境变量文件
+    cat > /opt/youtube_app/.env << 'EOF'
 # Flask配置
 SECRET_KEY=your-production-secret-key-here
 FLASK_ENV=production
@@ -145,19 +161,23 @@ FLASK_ENV=production
 REDIS_URL=redis://localhost:6379/0
 
 # 应用配置
-CACHE_DIR=/opt/youtube_downloader/cache
+CACHE_DIR=/opt/youtube_app/cache
+VIDEO_DIR=/opt/youtube_app/cache
+
+# 前端配置
+FRONTEND_DIR=/opt/youtube_web
 EOF
     
     # 设置文件权限
-    chmod 600 /opt/youtube_downloader/.env
+    chmod 600 /opt/youtube_app/.env
 }
 
-# 更新应用配置
-configure_app() {
-    log "更新应用配置..."
+# 更新后端应用配置
+configure_backend_app() {
+    log "更新后端应用配置..."
     
     # 更新Celery配置
-    cat > /opt/youtube_downloader/config/celery_config.py << 'EOF'
+    cat > /opt/youtube_app/config/celery_config.py << 'EOF'
 # Celery配置
 from celery.schedules import crontab
 import os
@@ -199,10 +219,10 @@ After=network.target redis-server.service
 Type=simple
 User=www-data
 Group=www-data
-WorkingDirectory=/opt/youtube_downloader
-Environment=PATH=/opt/youtube_downloader/venv/bin
-EnvironmentFile=/opt/youtube_downloader/.env
-ExecStart=/opt/youtube_downloader/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:5000 --timeout 120 app:app
+WorkingDirectory=/opt/youtube_app
+Environment=PATH=/opt/youtube_app/venv/bin
+EnvironmentFile=/opt/youtube_app/.env
+ExecStart=/opt/youtube_app/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:5000 --timeout 120 app:app
 Restart=always
 RestartSec=10
 
@@ -220,10 +240,10 @@ After=network.target redis-server.service
 Type=forking
 User=www-data
 Group=www-data
-WorkingDirectory=/opt/youtube_downloader
-Environment=PATH=/opt/youtube_downloader/venv/bin
-EnvironmentFile=/opt/youtube_downloader/.env
-ExecStart=/opt/youtube_downloader/venv/bin/celery -A celery_app.celery worker --loglevel=info --concurrency=4 --pidfile=/var/run/celery/worker.pid
+WorkingDirectory=/opt/youtube_app
+Environment=PATH=/opt/youtube_app/venv/bin
+EnvironmentFile=/opt/youtube_app/.env
+ExecStart=/opt/youtube_app/venv/bin/celery -A celery_app.celery worker --loglevel=info --concurrency=4 --pidfile=/var/run/celery/worker.pid
 ExecReload=/bin/kill -HUP $MAINPID
 PIDFile=/var/run/celery/worker.pid
 Restart=always
@@ -243,10 +263,10 @@ After=network.target redis-server.service
 Type=forking
 User=www-data
 Group=www-data
-WorkingDirectory=/opt/youtube_downloader
-Environment=PATH=/opt/youtube_downloader/venv/bin
-EnvironmentFile=/opt/youtube_downloader/.env
-ExecStart=/opt/youtube_downloader/venv/bin/celery -A celery_app.celery beat --loglevel=info --pidfile=/var/run/celery/beat.pid
+WorkingDirectory=/opt/youtube_app
+Environment=PATH=/opt/youtube_app/venv/bin
+EnvironmentFile=/opt/youtube_app/.env
+ExecStart=/opt/youtube_app/venv/bin/celery -A celery_app.celery beat --loglevel=info --pidfile=/var/run/celery/beat.pid
 ExecReload=/bin/kill -HUP $MAINPID
 PIDFile=/var/run/celery/beat.pid
 Restart=always
@@ -293,9 +313,16 @@ server {
     # 客户端最大请求体大小
     client_max_body_size 16M;
 
-    # 代理Flask应用
+    # 服务前端静态文件
     location / {
-        proxy_pass http://127.0.0.1:5000;
+        root /opt/youtube_web;
+        index index.html;
+        try_files $uri $uri/ =404;
+    }
+
+    # 代理API请求到Flask应用
+    location /api/ {
+        proxy_pass http://127.0.0.1:5000/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -305,8 +332,36 @@ server {
         proxy_read_timeout 300s;
     }
 
-    # 缓存静态文件（如果需要）
-    location ~* \.(jpg|jpeg|png|gif|ico|css|js)$ {
+    # 代理下载请求到Flask应用
+    location /download {
+        proxy_pass http://127.0.0.1:5000/download;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 代理状态查询请求到Flask应用
+    location /status/ {
+        proxy_pass http://127.0.0.1:5000/status/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 代理视频文件请求到Flask应用
+    location /video/ {
+        proxy_pass http://127.0.0.1:5000/video/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 缓存静态文件
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|woff|woff2|ttf|eot|svg)$ {
+        root /opt/youtube_web;
         expires 1y;
         add_header Cache-Control "public, immutable";
     }
@@ -367,7 +422,7 @@ create_monitoring_scripts() {
     log "创建监控脚本..."
     
     # 创建监控脚本
-    cat > /opt/youtube_downloader/monitor.sh << 'EOF'
+    cat > /opt/youtube_app/monitor.sh << 'EOF'
 #!/bin/bash
 echo "=== 系统资源使用情况 ==="
 free -h
@@ -385,7 +440,7 @@ echo "=== 应用进程 ==="
 ps aux | grep -E "(gunicorn|celery|redis)"
 EOF
     
-    chmod +x /opt/youtube_downloader/monitor.sh
+    chmod +x /opt/youtube_app/monitor.sh
 }
 
 # 主函数
@@ -397,11 +452,12 @@ main() {
     install_base_tools
     install_python
     install_system_dependencies
-    clone_project
+    clone_backend_project
+    clone_frontend_project
     setup_virtualenv
     configure_redis
-    configure_env
-    configure_app
+    configure_backend_env
+    configure_backend_app
     create_systemd_services
     configure_nginx
     configure_firewall
