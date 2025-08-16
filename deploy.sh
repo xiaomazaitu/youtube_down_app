@@ -77,7 +77,7 @@ clone_backend_project() {
     cd /opt/youtube_app
     
     # 克隆后端项目代码（这里假设从Git仓库获取，需要替换为实际仓库地址）
-    # git clone <你的后端项目仓库地址> .
+    git clone https://github.com/xiaomazaitu/youtube_down_app.git .
     # 或者如果项目文件已上传到服务器，可以跳过此步骤
     
     # 创建必要的目录
@@ -96,7 +96,7 @@ clone_frontend_project() {
     mkdir -p /opt/youtube_web
     
     # 克隆前端项目代码（这里假设从Git仓库获取，需要替换为实际仓库地址）
-    # git clone <你的前端项目仓库地址> /opt/youtube_web
+    git clone https://github.com/xiaomazaitu/youtube_down_web.git /opt/youtube_web
     # 或者如果项目文件已上传到服务器，可以跳过此步骤
     
     # 设置前端目录权限
