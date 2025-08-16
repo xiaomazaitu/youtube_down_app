@@ -74,11 +74,19 @@ clone_backend_project() {
     
     # 创建后端项目目录
     mkdir -p /opt/youtube_app
-    cd /opt/youtube_app
     
-    # 克隆后端项目代码（这里假设从Git仓库获取，需要替换为实际仓库地址）
-    git clone https://github.com/xiaomazaitu/youtube_down_app.git .
-    # 或者如果项目文件已上传到服务器，可以跳过此步骤
+    # 检查目录是否已包含项目文件
+    if [ -d "/opt/youtube_app" ] && [ -n "$(ls -A /opt/youtube_app)" ]; then
+        log "后端目录 /opt/youtube_app 已包含文件，跳过克隆步骤"
+        cd /opt/youtube_app
+    else
+        log "后端目录为空，开始克隆项目..."
+        cd /opt/youtube_app
+        
+        # 克隆后端项目代码（这里假设从Git仓库获取，需要替换为实际仓库地址）
+        git clone https://github.com/xiaomazaitu/youtube_down_app.git .
+        # 或者如果项目文件已上传到服务器，可以跳过此步骤
+    fi
     
     # 创建必要的目录
     mkdir -p /opt/youtube_app/cache
@@ -92,12 +100,18 @@ clone_backend_project() {
 clone_frontend_project() {
     log "克隆前端项目代码..."
     
-    # 创建前端项目目录
-    mkdir -p /opt/youtube_web
-    
-    # 克隆前端项目代码（这里假设从Git仓库获取，需要替换为实际仓库地址）
-    git clone https://github.com/xiaomazaitu/youtube_down_web.git /opt/youtube_web
-    # 或者如果项目文件已上传到服务器，可以跳过此步骤
+    # 检查前端目录是否已包含项目文件
+    if [ -d "/opt/youtube_web" ] && [ -n "$(ls -A /opt/youtube_web)" ]; then
+        log "前端目录 /opt/youtube_web 已包含文件，跳过克隆步骤"
+    else
+        log "前端目录为空，开始克隆项目..."
+        # 创建前端项目目录
+        mkdir -p /opt/youtube_web
+        
+        # 克隆前端项目代码（这里假设从Git仓库获取，需要替换为实际仓库地址）
+        git clone https://github.com/xiaomazaitu/youtube_down_web.git /opt/youtube_web
+        # 或者如果项目文件已上传到服务器，可以跳过此步骤
+    fi
     
     # 设置前端目录权限
     sudo chown -R www-data:www-data /opt/youtube_web
@@ -110,8 +124,13 @@ setup_virtualenv() {
     
     cd /opt/youtube_app
     
-    # 创建虚拟环境
-    python3 -m venv venv
+    # 检查虚拟环境是否已存在
+    if [ -d "/opt/youtube_app/venv" ]; then
+        log "虚拟环境已存在，跳过创建步骤"
+    else
+        # 创建虚拟环境
+        python3 -m venv venv
+    fi
     
     # 激活虚拟环境
     source venv/bin/activate
