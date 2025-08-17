@@ -31,3 +31,6 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(minute=0, hour='*'),  # 每小时执行一次
     },
 }
+
+# 设置broker连接重试行为，以消除Celery 6.0的警告
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
