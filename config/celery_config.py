@@ -3,8 +3,17 @@ from celery.schedules import crontab
 import os
 
 # Broker设置 - 从环境变量读取，如果没有则使用默认值
-CELERY_BROKER_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
-CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
+# 生产环境应始终设置REDIS_URL环境变量
+redis_url = os.environ.get('REDIS_URL')
+if not redis_url:
+    import warnings
+    warnings.warn("REDIS_URL not set, using default localhost connection. "
+                  "This is not recommended for production environments.", 
+                  RuntimeWarning)
+    redis_url = 'redis://localhost:6379/0'
+
+CELERY_BROKER_URL = redis_url
+CELERY_RESULT_BACKEND = redis_url
 
 # 任务序列化设置
 CELERY_TASK_SERIALIZER = 'json'

@@ -2,10 +2,20 @@ import os
 from celery import Celery
 
 # 创建一个不依赖Flask应用的Celery实例
+# 从环境变量获取Redis配置，如果没有则使用默认值（生产环境应始终设置环境变量）
+redis_url = os.environ.get('REDIS_URL')
+if not redis_url:
+    # 在生产环境中应该始终设置REDIS_URL环境变量
+    import warnings
+    warnings.warn("REDIS_URL not set, using default localhost connection. "
+                  "This is not recommended for production environments.", 
+                  RuntimeWarning)
+    redis_url = 'redis://localhost:6379/0'
+
 celery = Celery(
     'youtube_downloader',
-    broker=os.environ.get('REDIS_URL') or 'redis://localhost:6379/0',
-    backend=os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
+    broker=redis_url,
+    backend=redis_url
 )
 
 # 更新配置

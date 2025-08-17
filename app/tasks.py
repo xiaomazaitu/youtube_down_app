@@ -2,8 +2,8 @@ import yt_dlp
 import os
 import subprocess
 import time
-import shlex
 import logging
+import hashlib
 from celery import current_task
 from celery_app import celery
 
@@ -26,10 +26,13 @@ def download_video(self, url):
         cache_dir = os.path.join(basedir, 'cache')
         os.makedirs(cache_dir, exist_ok=True)
         
+        # 生成安全的文件名（使用URL的哈希值）
+        url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()
+        
         # yt-dlp配置
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': os.path.join(cache_dir, '%(id)s.%(ext)s'),
+            'outtmpl': os.path.join(cache_dir, f'{url_hash}.%(ext)s'),
             'progress_hooks': [lambda d: self.update_state(
                 state='PROGRESS', 
                 meta={'status': f'下载进度: {d.get("downloaded_bytes", 0)} bytes'})
@@ -47,12 +50,13 @@ def download_video(self, url):
         
         # 如果不是MP4格式，使用ffmpeg转换
         if not filename.endswith('.mp4'):
-            mp4_filename = os.path.join(cache_dir, f'{video_id}.mp4')
-            # 使用shlex.quote安全地处理文件名
+            # 使用哈希值生成安全的MP4文件名
+            mp4_filename = os.path.join(cache_dir, f'{url_hash}.mp4')
+            # 使用subprocess安全地调用ffmpeg（列表形式参数传递已确保安全性）
             subprocess.run([
-                'ffmpeg', '-i', shlex.quote(filename), 
+                'ffmpeg', '-i', filename, 
                 '-c:v', 'libx264', '-c:a', 'aac', 
-                '-strict', 'experimental', shlex.quote(mp4_filename)
+                '-strict', 'experimental', mp4_filename
             ], check=True)
             
             # 删除原始文件
